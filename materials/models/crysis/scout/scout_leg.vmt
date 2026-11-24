@@ -1,0 +1,23 @@
+"VertexlitGeneric"
+{
+	"$basetexture" "models/crysis/scout/scout_leg"
+	"$bumpmap" "models/crysis/scout/scout_leg_n"
+	"$halflambert" "1"					
+	"$nocull" 0
+	"$nodecal" 0
+	
+	"$phong" "1"
+	"$phongboost"	"0.5" 		
+	"$phongexponent" "15"
+	"$phongalbedotint"	"1"
+	"$phongfresnelranges"	"[1 1 1]"
+	"$basemapalphaphongmask" "0"
+	
+	"$selfillum" "1" 
+	"$selfillumtint" "[3 3 3]"
+	
+	"$rimlight" "1"
+	"$rimlightexponent" "50"
+	"$rimlightboost" "0.05"
+	
+}

@@ -29,7 +29,7 @@
 | # | DEPENDENCY | STATUS | NEEDED FOR |
 |:--:|:--|:--|:--|
 | 1 | **[Drones Rewrite](https://github.com/calafex/DronesRewrite)** | 🔴 **ОБЯЗАТЕЛЬНО** | база дрона, полёт, камера, HUD, оружие — без него аддон не работает |
-| 2 | **GWeather** (аддон с сущностью `gw_t1_night`) | 🟡 опционально | ночной режим и фонарь из F3 (пункт «НОЧЬ») |
+| 2 | **[GWeather](https://steamcommunity.com/workshop/filedetails/?id=3322707383}** (аддон с сущностью `gw_t1_night`) | 🟡 опционально | ночной режим и фонарь из F3 (пункт «НОЧЬ») |
 
 </div>
 

@@ -471,6 +471,22 @@ local function segDistSqr(p, a, b)
 	return (p - (a + ab * t)):LengthSqr()
 end
 
+-- База DRR выставляет отношение НПС по IsEnemy(класс) каждые 0.1 с и для
+-- «враждебного» класса ставит D_HT нашим NPC-триггерам. Дружественный класс
+-- должен считаться другом и здесь, иначе НПС снова берут дрон в враги.
+function ENT:IsEnemy(class)
+	local friends = self.LvsFriendClasses
+
+	if friends and class and friends[class] then return false end
+
+	local base = self.BaseClass
+
+	if base and base.IsEnemy then return base.IsEnemy(self, class) end
+
+	-- без базы считаем врагом: иначе НПС перестали бы замечать все дроны
+	return true
+end
+
 -- Точка попадания рядом с реальными костями (щупальца, голова, корпус)
 function ENT:LvsHitVisiblePart(pos)
 	local count = self:GetBoneCount()
@@ -491,6 +507,7 @@ function ENT:LvsHitVisiblePart(pos)
 			end
 		end
 	end
+
 
 	-- попадание внутри корпуса тоже считаем валидным
 	local lp = self:WorldToLocal(pos)

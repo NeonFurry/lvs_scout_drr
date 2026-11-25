@@ -47,20 +47,35 @@ hook.Add("EntityTakeDamage", "lvs_scout_friend_npc", function(ent, dmg)
 	end
 end)
 
+-- НПС видят дрон через триггеры базы DRR, а не через сам дрон: дружбу
+-- ставим на всё, что может попасть к ним во враги, и приоритетом 100,
+-- чтобы перебить D_HT, который база пишет с приоритетом 99
+local function calmNpc(npc, drone)
+	npc:AddEntityRelationship(drone, D_LI, 100)
+
+	for _, tr in pairs(drone.ValidNpcTriggers or {}) do
+		if IsValid(tr) then npc:AddEntityRelationship(tr, D_LI, 100) end
+	end
+
+	local enemy = npc:GetEnemy()
+
+	if enemy == drone or (IsValid(enemy) and enemy.LvsDrone == drone) then
+		npc:SetEnemy(NULL)
+		npc:ClearEnemyMemory()
+	end
+end
+
 hook.Remove("Think", "lvs_scout_friend_npc_calm")
 
 hook.Add("Think", "lvs_scout_friend_npc_calm", function()
 	if CurTime() < (LvsFriendCalmAt or 0) then return end
-	LvsFriendCalmAt = CurTime() + 1
+	LvsFriendCalmAt = CurTime() + 0.5
 
 	for _, drone in ipairs(ents.FindByClass("lvs_scout_drr")) do
 		if IsValid(drone) and drone.LvsFriendClasses then
 			for _, npc in ipairs(ents.FindInSphere(drone:GetPos(), 4000)) do
 				if IsValid(npc) and npc:IsNPC() and friendOf(drone, npc:GetClass()) then
-					npc:AddEntityRelationship(drone, D_LI, 99)
-
-					-- если уже успел взять в враги — сбрасываем
-					if npc:GetEnemy() == drone then npc:SetEnemy(NULL) end
+					calmNpc(npc, drone)
 				end
 			end
 		end

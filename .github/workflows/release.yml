@@ -38,7 +38,7 @@ jobs:
       - name: Оповестить Discord
         if: success()
         env:
-          HOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          HOOK: ${{ secrets.DISCORD_WEBHOOK || vars.DISCORD_WEBHOOK }}
           TAG: ${{ github.ref_name }}
           URL: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
         run: |

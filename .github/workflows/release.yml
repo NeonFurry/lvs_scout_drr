@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Собрать архив аддона
+        run: |
+          mkdir -p build/lvs_scout_drr
+          cp -r lua models materials addon.json build/lvs_scout_drr/
+          cd build
+          zip -r "../lvs_scout_drr-${GITHUB_REF_NAME}.zip" lvs_scout_drr
+
+      - name: Приложить к релизу
+        uses: softprops/action-gh-release@v2
+        with:
+          files: lvs_scout_drr-${{ github.ref_name }}.zip
+          generate_release_notes: true

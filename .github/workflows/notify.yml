@@ -1,0 +1,43 @@
+name: Discord
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Отправить в Discord
+        env:
+          HOOK: ${{ secrets.DISCORD_WEBHOOK || vars.DISCORD_WEBHOOK }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          URL: ${{ github.event.release.html_url || format('https://github.com/{0}/releases', github.repository) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+
+          hook = os.environ.get("HOOK", "").strip()
+
+          if not hook.startswith("https://"):
+              print("::warning::не задан DISCORD_WEBHOOK (secret или variable) — сообщение пропущено")
+              raise SystemExit(0)
+
+          msg = ("@everyone\n"
+                 f"Новый релиз LVS Scout {os.environ['TAG']}\n"
+                 "Аддон для Drones Rewrite (GMod): щупальца, криолуч, щит, ЭМИ, стайный ИИ.\n"
+                 "В релизе: zip для установки и gma для Workshop.\n"
+                 f"Скачать: {os.environ['URL']}")
+
+          body = json.dumps({"content": msg,
+                             "allowed_mentions": {"parse": ["everyone"]}}).encode()
+
+          req = urllib.request.Request(hook, data=body,
+                                       headers={"Content-Type": "application/json"})
+          urllib.request.urlopen(req).read()
+          PY

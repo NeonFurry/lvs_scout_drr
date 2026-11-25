@@ -1,0 +1,358 @@
+-- Щупальца LVS Scout.
+-- База: оригинальные клипы Crysis (fly_idle / fly_slow), декодированные из SMD.
+-- Сверху добавляется только наклон от разворота: он не выдуман, а взят из
+-- фактического изменения угла, поэтому щупальца отстают при повороте.
+
+local SEG_LIMIT   = 16          -- предел на кость, градусы (был 12 — кости в него упирались)
+local UPDATE_RATE = 30          -- Герц; клипы сняты с частотой 30 кадров/с
+local BLEND_RATE  = 2.5         -- скорость перехода fly_idle -> fly_slow
+local TURN_GAIN   = 0.010       -- градусов наклона на градус поворота
+local TURN_MAX    = 6           -- предел наклона от разворота
+local EPSILON     = 0.05        -- ниже этого кость не пишем (репликация дорогая)
+local AMP         = 1.0         -- клип добавляет микро-нерегулярность
+local WAVE_P      = 2.5         -- изгиб вдоль плоскости щупальца
+local WAVE_Y      = 2.0         -- боковое покачивание
+
+local VERSION = "clean-11 (2.5/2.0)"
+
+-- карта: id кости -> { колонка в таблице клипа, радиальное направление в локальных осях }
+local function buildMap(ent)
+	local map = {}
+
+	for idx, name in ipairs(LVS_TENT_BONES) do
+		local id = ent:LookupBone(name)
+
+		if id then
+			-- доля по длине щупальца: из имени ropeN_segMM; клешни — ближе к концу
+			local seg = tonumber(name:match("_seg(%d+)")) or 13
+
+			map[id] = { col = (idx - 1) * 3 + 1, k = seg / 13 }
+		end
+	end
+
+	-- радиальное направление каждого щупальца берём по его первой кости:
+	-- знак наклона в развороте зависит от того, куда смотрит плоскость
+	for _, segs in pairs(ent.LvsRopeBones or {}) do
+		local first = segs and segs[1]
+
+		if first and first.id and map[first.id] then
+			local m = ent:GetBoneMatrix(first.id)
+
+			if m then
+				local local_ = ent:WorldToLocal(m:GetTranslation())
+				local_.z = 0
+
+				if local_:LengthSqr() > 1 then
+					local dir = local_:GetNormalized()
+
+					for _, b in ipairs(segs) do
+						if map[b.id] then map[b.id].radial = dir end
+					end
+				end
+			end
+		end
+	end
+
+	return map
+end
+
+local function sample(clip, col, t)
+	local n = clip.n
+	local tt = t * clip.fps
+	local base = math.floor(tt)
+	local frac = tt - base
+	local A = clip.frames[(base % n) + 1]
+	local B = clip.frames[((base + 1) % n) + 1]
+
+	return A[col] + (B[col] - A[col]) * frac,
+		A[col + 1] + (B[col + 1] - A[col + 1]) * frac,
+		A[col + 2] + (B[col + 2] - A[col + 2]) * frac
+end
+
+local function clamp(v)
+	return math.Clamp(v, -SEG_LIMIT, SEG_LIMIT)
+end
+
+local function solve(ent)
+	local t = CurTime()
+
+	if t < (ent.LvsTentNext or 0) then return end
+
+	ent.LvsTentNext = t + 1 / UPDATE_RATE
+
+	-- первый вызов: показываем состояние до любых проверок
+	if not ent.LvsTentReport then
+		ent.LvsTentReport = true
+
+		print(string.format("[LVS tent] вызов солвера: класс %s, костей модели %d, rope-таблица %s, ключи %s",
+			ent:GetClass(), ent:GetBoneCount(),
+			tostring(ent.LvsRopeBones ~= nil), tostring(LVS_TENT_IDLE ~= nil)))
+	end
+
+	if not LVS_TENT_BONES or not LVS_TENT_IDLE then return end
+	-- LvsRopeBones больше не требование: карта строится по именам из клипа,
+	-- поэтому анимация не зависит от того, успел ли ResolveBones класса
+
+	if not ent.LvsTentMap then
+		ent.LvsTentMap = buildMap(ent)
+
+		-- если карта пуста — имена в таблице не совпали с моделью.
+		-- Печатаем реальные имена костей, чтобы это было видно сразу.
+		local count = 0
+
+		for _ in pairs(ent.LvsTentMap) do count = count + 1 end
+
+		if count == 0 then
+			local sample = {}
+
+			for i = 0, ent:GetBoneCount() - 1 do
+				local name = ent:GetBoneName(i)
+
+				if name and #sample < 6 and name:lower():find("rope") then
+					sample[#sample + 1] = name
+				end
+			end
+
+			print("[LVS tent] карта пуста. Кости модели: " .. table.concat(sample, ", "))
+		end
+		ent.LvsTentCur = {}
+		ent.LvsTentLean = 0
+		ent.LvsTentSlow = 0
+		ent.LvsTentAng = ent:GetAngles()
+
+		local drv = ent:GetDriver()
+		ent.LvsTentView = IsValid(drv) and drv:EyeAngles() or ent.LvsTentAng
+	end
+
+	-- 1. Наклон от разворота. Берём изменение угла с прошлого обновления;
+	--    у DRR дрон крутится корпусом, а прицел может стоять — сравниваем оба.
+	local ang = ent:GetAngles()
+	local drv = ent:GetDriver()
+	local view = IsValid(drv) and drv:EyeAngles() or ang
+
+	local dBody = math.AngleDifference(ang.y, ent.LvsTentAng.y)
+	local dView = math.AngleDifference(view.y, ent.LvsTentView.y)
+	local dYaw = math.abs(dView) > math.abs(dBody) and dView or dBody
+
+	ent.LvsTentAng = ang
+	ent.LvsTentView = view
+
+	local decay = math.pow(0.02, 1 / UPDATE_RATE)
+
+	ent.LvsTentLean = math.Clamp((ent.LvsTentLean + dYaw * TURN_GAIN) * decay, -TURN_MAX, TURN_MAX)
+
+	-- 2. Переход в клип полёта по скорости: на месте fly_idle, в движении fly_slow
+	local speed = ent:GetVelocity():Length()
+	local wantSlow = math.Clamp((speed - 60) / 340, 0, 1)
+
+	ent.LvsTentSlow = Lerp(math.min(BLEND_RATE / UPDATE_RATE, 1), ent.LvsTentSlow, wantSlow)
+
+	-- одноразовый отчёт о первом тике: видно, дошло ли до записи костей
+	if not ent.LvsTentReport then
+		ent.LvsTentReport = true
+
+		local cnt, firstId, firstCol = 0, nil, nil
+
+		for id, info in pairs(ent.LvsTentMap) do
+			cnt = cnt + 1
+			firstId, firstCol = id, info.col
+		end
+
+		local ax, ay, az = 0, 0, 0
+
+		if firstCol then ax, ay, az = sample(LVS_TENT_IDLE, firstCol, t) end
+
+		print(string.format("[LVS tent] тик: костей %d, первая id=%s, кадр %.2f %.2f %.2f",
+			cnt, tostring(firstId), ax, ay, az))
+	end
+
+	local slowIdx = ent.LvsTentSlow
+	local lean = ent.LvsTentLean
+	local right = ent:GetRight()
+	local fwd, up = ent:GetForward(), ent:GetUp()
+
+	-- 3. Кадры клипа + наклон
+	for id, info in pairs(ent.LvsTentMap) do
+		local ax, ay, az = sample(LVS_TENT_IDLE, info.col, t)
+
+		if slowIdx > 0.01 and LVS_TENT_SLOW then
+			local bx, by, bz = sample(LVS_TENT_SLOW, info.col, t)
+
+			ax = Lerp(slowIdx, ax, bx)
+			ay = Lerp(slowIdx, ay, by)
+			az = Lerp(slowIdx, az, bz)
+		end
+
+		if info.radial and lean ~= 0 then
+			local dir = fwd * info.radial.x + ent:GetRight() * info.radial.y + up * info.radial.z
+
+			az = az - lean * dir:Dot(right)
+		end
+
+		-- видимая волна поверх клипа: клип даёт только микро-жизнь,
+		-- поэтому основной рисунок формируется здесь
+		local phase = t * 1.6 - (info.k or 0.5) * 5.0
+
+		ax = ax * AMP + (LVS_TENT_WP or WAVE_P) * math.sin(phase)
+		ay = ay * AMP
+		az = az * AMP + (LVS_TENT_WY or WAVE_Y) * math.cos(phase * 0.87)
+
+		local target = Angle(clamp(ax), clamp(ay), clamp(az))
+
+		-- ручная проверка: жёсткий угол на все кости, чтобы увидеть скиннинг
+		if ent.LvsTentRaw and CurTime() < (ent.LvsTentRawUntil or 0) then
+			target = ent.LvsTentRaw
+		end
+		local last = ent.LvsTentCur[id]
+
+		if not last or math.abs(target.p - last.p) > EPSILON
+			or math.abs(target.y - last.y) > EPSILON
+			or math.abs(target.r - last.r) > EPSILON then
+			ent.LvsTentCur[id] = target
+			ent:ManipulateBoneAngles(id, target)
+		end
+	end
+end
+
+-- Ошибки не должны молча убивать анимацию: печатаем не чаще раза в 5 секунд.
+function LvsTentacleUpdate(ent)
+	local ok, err = pcall(solve, ent)
+
+	if not ok and CurTime() > (ent.LvsTentErrT or 0) then
+		ent.LvsTentErrT = CurTime() + 5
+		print("[LVS tent] ошибка: " .. tostring(err))
+	end
+end
+
+-- Подмена и в таблице класса, и на живых дронах: правки применяются
+-- обновлением Lua, без перезахода на карту.
+local stored = scripted_ents.GetStored and scripted_ents.GetStored("lvs_scout_drr")
+
+if stored and stored.t then
+	stored.t.UpdateTentacles = LvsTentacleUpdate
+end
+
+local function install()
+	for _, e in ipairs(ents.FindByClass("lvs_scout_drr")) do
+		e.UpdateTentacles = LvsTentacleUpdate
+	end
+end
+
+install()
+
+local nextInstall = 0
+
+hook.Add("Think", "lvs_scout_tentacle_install", function()
+	if nextInstall > CurTime() then return end
+
+	nextInstall = CurTime() + 1
+	install()
+end)
+
+concommand.Add("lvs_tent_debug", function(ply)
+	if not IsValid(ply) then return end
+
+	local e = ply:GetNWEntity("DronesRewriteDrone")
+
+	-- если не пилотируешь — берём ближайшего дрона рядом
+	if not IsValid(e) then
+		local best, bestD = nil, 800 ^ 2
+
+		for _, d in ipairs(ents.FindByClass("lvs_scout_drr")) do
+			local dist = d:GetPos():DistToSqr(ply:GetPos())
+
+			if dist < bestD then best, bestD = d, dist end
+		end
+
+		e = best
+	end
+
+	if not IsValid(e) then print("[LVS tent " .. VERSION .. "] дронов рядом нет (ближе 800)"); return end
+
+	local n = 0
+
+	for _ in pairs(e.LvsTentMap or {}) do n = n + 1 end
+
+	local moved = 0
+	local peak = 0
+	local tipId, tipAng = nil, 0
+
+	for id in pairs(e.LvsTentMap or {}) do
+		local a = e:GetManipulateBoneAngles(id)
+
+		if a then
+			local m = math.max(math.abs(a.p), math.abs(a.y), math.abs(a.r))
+
+			if m > 0.3 then moved = moved + 1 end
+			if m > peak then peak = m end
+			if a.y and math.abs(a.y) > math.abs(tipAng) then tipAng, tipId = a.y, id end
+		end
+	end
+
+	print(string.format("[LVS tent %s] костей в карте: %d | отклонено >0.3°: %d | макс %.2f° | кость %s y=%.2f",
+		VERSION, n, moved, peak, tostring(tipId), tipAng))
+	print(string.format("  lean %.2f | slow %.2f", e.LvsTentLean or 0, e.LvsTentSlow or 0))
+end)
+
+print("[LVS tent] loaded " .. VERSION .. " (" .. (SERVER and "SERVER" or "CLIENT") .. ")")
+
+-- Собственный тик: анимация не зависит от того, вызывает ли класс
+-- UpdateTentacles у этого экземпляра (в памяти карты мог остаться старый код).
+local tickNext = 0
+
+hook.Add("Think", "lvs_scout_tent_tick", function()
+	local now = CurTime()
+
+	if tickNext > now then return end
+
+	tickNext = now + 1 / 30
+
+	for _, e in ipairs(ents.FindByClass("lvs_scout_drr")) do
+		LvsTentacleUpdate(e)
+	end
+end)
+
+local function nearestDrone(ply)
+	local e = ply:GetNWEntity("DronesRewriteDrone")
+
+	if IsValid(e) then return e end
+
+	local best, bestD = nil, 800 ^ 2
+
+	for _, d in ipairs(ents.FindByClass("lvs_scout_drr")) do
+		local dist = d:GetPos():DistToSqr(ply:GetPos())
+
+		if dist < bestD then best, bestD = d, dist end
+	end
+
+	return best
+end
+
+concommand.Add("lvs_tent_test", function(ply, cmd, args)
+	if not IsValid(ply) then return end
+
+	local e = nearestDrone(ply)
+
+	if not IsValid(e) then print("[LVS tent test] дронов рядом нет"); return end
+
+	local deg = tonumber(args[1]) or 16
+	local mode = string.lower(args[2] or "x")
+
+	if mode == "y" then e.LvsTentRaw = Angle(0, deg, 0)
+	elseif mode == "z" then e.LvsTentRaw = Angle(0, 0, deg)
+	else e.LvsTentRaw = Angle(deg, 0, 0) end
+
+	e.LvsTentRawUntil = CurTime() + 6
+
+	print(string.format("[LVS tent test] %d° по оси %s на 6 с", deg, mode))
+end)
+
+concommand.Add("lvs_tent_wave", function(ply, cmd, args)
+	local p = tonumber(args[1])
+	local y = tonumber(args[2])
+
+	if p then LVS_TENT_WP = p end
+	if y then LVS_TENT_WY = y end
+
+	print(string.format("[LVS tent] волна: P %.1f | Y %.1f", LVS_TENT_WP or WAVE_P, LVS_TENT_WY or WAVE_Y))
+end)

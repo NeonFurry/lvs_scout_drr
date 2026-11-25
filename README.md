@@ -80,7 +80,7 @@
 - ⬢ **Shards (ПКМ)**: скорость 7000, урон 16, замороженную цель добивает мгновенно.
 - ⬢ **Упреждение**: скорость цели измеряется по смещению позиции (у антлионов `GetVelocity()` всегда 0), точка встречи решается итеративно.
 - ⬢ **Линия огня**: если рельеф мешает, точка прицела поднимается (0/18/36/60) до свободной трассы; иначе выстрел не тратится.
-- ⬢ **Свой тип урона** `DMG_CRYO` у пулемёта: страйдер получает его через обёртку (`autorun/server/lvs_scout_cryo_damage.lua`), которая пересобирает урон в `DMG_BLAST` без импульса — броня пробивается, но страйдер не вздрагивает. Для прочих целей остаётся добивающий удар `DMG_BLAST`, если броня погасила первый.
+- ⬢ **Свой тип урона** `DMG_CRYO` у пулемёта: страйдер получает его через обёртку (`autorun/server/lvs_scout_core.lua`), которая пересобирает урон в `DMG_BLAST` без импульса — броня пробивается, но страйдер не вздрагивает. Для прочих целей остаётся добивающий удар `DMG_BLAST`, если броня погасила первый.
 
 ## ◈ E.M.P.
 
@@ -199,6 +199,7 @@ lvs_scout_drr/
 ├── models/
 ├── materials/
 ├── addon.json
+├── LICENSE
 └── README.md
 ```
 
@@ -287,12 +288,12 @@ lvs_scout_drr/
   - `SEGS_PER_ROPE`, `TENTACLE_WAVE`, `TENTACLE_MAX_BEND`, `TENTACLE_SPEED` — щупальца;
   - `SHIELD_REGEN_DELAY` — перезарядка щита после джаммера;
   - `LvsRandomNavCenter(..., 4500)` — радиус выбора навигационной зоны.
-- `lua/autorun/server/lvs_scout_emp.lua` — `RADIUS` (2000), `RAGDOLL_NPC` (10 с), `BLIND_PLY` (5 с).
+- `lua/autorun/server/lvs_scout_core.lua` — ЭМИ: `RADIUS` (2000), `RAGDOLL_NPC` (10 с), `BLIND_PLY` (5 с).
 - `lua/autorun/server/lvs_scout_tentacles.lua` — `SEG_LIMIT`, `AMP`, `WAVE_P`, `WAVE_Y`, `UPDATE_RATE`.
-- `lua/autorun/client/lvs_scout_emp_fx.lua` — палитра `CEPH`, число сегментов `ROWS` сферы.
+- `lua/autorun/client/lvs_scout_effects.lua` — ЭМИ: палитра `CEPH`, число сегментов `ROWS` сферы.
 - `lua/entities/lvs_scout_ice/init.lua` — `SPEED`, `DAMAGE`, `LIFE` осколка.
-- `lua/autorun/server/lvs_scout_jammer_range.lua` — `MAX_DIST` и конус наведения джаммера.
-- `lua/autorun/client/lvs_scout_vision.lua` — `LvsBlipColor` (цвета), `MAX_DIST` подсветки.
+- `lua/autorun/server/lvs_scout_core.lua` — джаммер: `MAX_DIST` и конус наведения.
+- `lua/autorun/client/lvs_scout_ui.lua` — подсветка целей: `LvsBlipColor`, `MAX_DIST`.
 - `lua/autorun/client/lvs_scout_hud_crysis.lua` — радар: `RADAR_RANGE`, `ICONS`, `ICON_SCALE`.
 
 ---
@@ -307,40 +308,20 @@ lua/
 │   └── lvs_scout_hitbox/       # прокси-хитбоксы на костях
 ├── autorun/
 │   ├── server/
-│   │   ├── lvs_scout_ai_report.lua      # дамп целей ИИ
-│   │   ├── lvs_scout_bones_report.lua   # сверка костей модели и таблиц
-│   │   ├── lvs_scout_cryo_damage.lua    # тип DMG_CRYO + обёртка страйдера
-│   │   ├── lvs_scout_emp.lua            # ЭМИ: регдол НПС, вспышка игрокам
-│   │   ├── lvs_scout_freeze.lua         # заморозка, IsFrozen
-│   │   ├── lvs_scout_friendly_dmg.lua   # дружественный огонь, нейтралитет друзей
-│   │   ├── lvs_scout_gweather.lua       # синхронизация ночи GWeather
-│   │   ├── lvs_scout_jammer_range.lua   # джаммер без лимита дистанции
-│   │   ├── lvs_scout_mark.lua           # метка цели пилотом
-│   │   ├── lvs_scout_nodes_report.lua   # состояние навигации на карте
-│   │   ├── lvs_scout_pilot_body.lua     # тело пилота заморожено
-│   │   ├── lvs_scout_tentacles.lua      # решатель волны щупалец + отладка
-│   │   └── lvs_scout_tent_keyframes.lua # клипы fly_idle / fly_slow (скрипт)
+│   │   ├── lvs_scout_core.lua           # ЯДРО: ЭМИ, заморозка, DMG_CRYO,
+│   │   │                                #   друзья-НПС, джаммер, ночь, метка, пилот
+│   │   ├── lvs_scout_tentacles.lua      # щупальца: волна, ключи, отладка
+│   │   ├── lvs_scout_tent_keyframes.lua # данные: клипы fly_idle / fly_slow
+│   │   └── lvs_scout_dev.lua            # отчёты: цели ИИ, кости, навигация
 │   └── client/
-│       ├── lvs_scout_hud_crysis.lua     # пресет "Crysis Ceph" + радар, ЭМИ в 3-м лице
-│       ├── lvs_scout_hud_scifi2.lua     # обёртка пресета Sci Fi 2
-│       ├── lvs_scout_hudfix.lua         # стабилизация центра HUD
-│       ├── lvs_scout_skin_menu.lua      # F3-меню, друзья
-│       ├── lvs_scout_vision.lua         # подсветка целей, цвета
-│       ├── lvs_scout_emp_fx.lua         # визуал ЭМИ и вспышка экрана
-│       ├── lvs_scout_nightvision.lua    # ночная оптика
-│       ├── lvs_scout_overlay.lua        # оверлей кабины
-│       ├── lvs_scout_class.lua          # общие клиентские поля класса
-│       ├── lvs_scout_jammer_screen.lua  # таймер на экране джаммера
-│       ├── lvs_scout_shield_hud.lua     # плашки щита
-│       ├── lvs_scout_frozen_*.lua       # визуал заморозки
-│       ├── lvs_scout_freeze_*.lua       # эффекты и следы заморозки
-│       ├── lvs_scout_pilot_model.lua    # скрытие модели пилота
-│       ├── lvs_scout_auto_cam.lua       # камера автопилота
-│       └── lvs_scout_muzzle.lua         # вспышка дула
+│       ├── lvs_scout_hud_crysis.lua     # пресет "Crysis Ceph" + радар
+│       ├── lvs_scout_hud_extra.lua      # пресет Sci Fi 2 + центр HUD
+│       ├── lvs_scout_effects.lua        # ЭМИ, заморозка, оптика, джаммер, щит, дуло
+│       └── lvs_scout_ui.lua             # F3-меню, оверлей, камера, подсветка
 └── effects/lvs_ice_shatter.lua
 ```
 
-Всего **40** Lua-файлов.
+Всего **17** Lua-файлов: 8 в `entities/`, 4 серверных и 4 клиентских в `autorun/`.
 
 ---
 
